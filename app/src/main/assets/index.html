@@ -285,7 +285,9 @@ function doBackup(){
   var name="bagis-"+safeName(cur().name)+"-"+stamp()+".txt",txt=backupText();
   /* 1) Android köprüsü varsa doğrudan İndirilenler klasörüne yaz */
   try{
-    if(window.AndroidBackup&&window.AndroidBackup.saveToDownloads(name,txt)===true){
+    var br=(window.BagisBackup&&typeof window.BagisBackup.saveToDownloads==="function")?window.BagisBackup
+          :(window.AndroidBackup&&typeof window.AndroidBackup.saveToDownloads==="function")?window.AndroidBackup:null;
+    if(br&&br.saveToDownloads(name,txt)===true){
       note("İndirilenler klasörüne kaydedildi: "+name);
       return;
     }
@@ -358,6 +360,16 @@ function doRestore(){
 window.restoreBagisBackup=function(contents){
   try{applyRestore(String(contents||""),"")}
   catch(e){note("Yedek geri yüklenemedi: "+e.message,1)}
+};
+/* Eski sürümün JSON yedeği: {format, list:{name, items:[{name, amountKurus}]}} */
+window.__bagisJsonBackup=function(obj){
+  try{
+    if(!obj||!obj.list||!Array.isArray(obj.list.items))throw new Error("Geçersiz yedek");
+    var items=obj.list.items.map(function(x){return {n:String(x.name||"").trim(),k:x.amountKurus|0}})
+      .filter(function(x){return x.n&&x.k>0});
+    var nm=String(obj.list.name||"").trim()||defName();
+    return applyRestore("## Liste: "+nm+"\n"+items.map(function(x){return x.n+" | "+fmt.format(x.k/100)}).join("\n"),nm);
+  }catch(e){note("Yedek geri yüklenemedi: "+e.message,1)}
 };
 /* Yedek metnini uygular. Android köprüsü ve dosya seçici buradan geçer. */
 function applyRestore(raw,fileName){
