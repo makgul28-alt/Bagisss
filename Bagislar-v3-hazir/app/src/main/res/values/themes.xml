@@ -1,0 +1,3 @@
+<resources>
+    <style name="Theme.Bagis" parent="Theme.AppCompat.DayNight.NoActionBar" />
+</resources>
