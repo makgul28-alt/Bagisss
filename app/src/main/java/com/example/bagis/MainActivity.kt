@@ -80,6 +80,36 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread { exportBackup(fileName, contents) }
         }
 
+        /** Yedeği doğrudan İndirilenler klasörüne yazar (web arayüzü bunu çağırır). */
+        @JavascriptInterface
+        fun saveToDownloads(fileName: String, contents: String): Boolean {
+            val safeName = fileName.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim()
+                .ifBlank { "Bagis_Yedegi.txt" }
+                .let { if (it.endsWith(".txt", ignoreCase = true)) it else "$it.txt" }
+            return try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val values = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, safeName)
+                        put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                    }
+                    val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                        ?: return false
+                    contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { it.write(contents) }
+                        ?: return false
+                    true
+                } else {
+                    @Suppress("DEPRECATION")
+                    val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                    if (!dir.exists()) dir.mkdirs()
+                    java.io.FileOutputStream(java.io.File(dir, safeName)).use { it.write(contents.toByteArray(Charsets.UTF_8)) }
+                    true
+                }
+            } catch (e: Exception) {
+                false
+            }
+        }
+
         @JavascriptInterface
         fun chooseBackup() {
             runOnUiThread {
