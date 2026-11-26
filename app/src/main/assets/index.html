@@ -57,7 +57,7 @@ input#amount{text-align:right}
 .box textarea{height:150px;resize:none;font-size:13px}
 .btns{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
 .btns button{font:inherit;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);padding:10px 16px;cursor:pointer}
-.btns #mok{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+.btns .primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
 [hidden]{display:none!important}
 </style>
 </head>
@@ -87,9 +87,9 @@ input#amount{text-align:right}
 </div>
 <div id="modal" hidden><div class="box" role="dialog" aria-modal="true">
   <p id="mmsg"></p><input id="min" type="text" autocomplete="off"><textarea id="mta"></textarea>
-  <div class="btns" id="mbtns"><button id="mx" type="button">Vazgeç</button><button id="mx2" type="button"></button><button id="mok" type="button">Tamam</button></div>
+  <div class="btns" id="mbtns"></div>
 </div></div>
-<input type="file" id="file" accept=".txt,text/plain" hidden>
+<input type="file" id="file" accept=".json,.txt,application/json,text/plain" hidden>
 <script>
 var KEY="bagis-listesi-v3",OLD="bagis-listesi-v2",OLD1="bagis-listesi-v1",MONTHS=["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
 var $=function(i){return document.getElementById(i)};
@@ -113,22 +113,39 @@ if(!data||!data.lists||!data.lists.length){
 function cur(){for(var i=0;i<data.lists.length;i++)if(data.lists[i].id===data.cur)return data.lists[i];data.cur=data.lists[0].id;return data.lists[0]}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(data))}catch(e){}}
 function note(t,bad){var e=$("err");if(!e)return;e.textContent=t;e.className="msg"+(bad?" bad":"");if(!bad)setTimeout(function(){if(e.textContent===t)e.textContent=""},2000)}
-var dlgButtons=null;
-function dlg(o){return new Promise(function(res){
-  var inp=$("min"),ta=$("mta"),x2=$("mx2");
+var dlgButtons=null,dlgBusy=false;
+/* Modalı her açılışta sıfırdan kurar; hiçbir butona sabit id vermez,
+   böylece id çakışması yüzünden butonların ölmesi imkânsız olur. */
+function openModal(o){
+  var m=$("modal"),inp=$("min"),ta=$("mta"),btns=$("mbtns");
   dlgButtons=o.buttons||null;
-  $("mmsg").textContent=o.msg;inp.hidden=!o.input;ta.hidden=!o.area;
-  if(o.input)inp.value=o.def||"";if(o.area)ta.value=o.def||"";
-  x2.hidden=!o.extra;if(o.extra)x2.textContent=o.extra;
-  $("mok").textContent=o.ok||"Tamam";$("mx").textContent=o.cancel||"Vazgeç";
-  $("mok").hidden=!o.ok;
-  $("modal").hidden=false;(o.input?inp:o.area?ta:$("mok")).focus();if(o.input)inp.select();
-  function close(v){$("modal").hidden=true;$("mok").onclick=$("mx").onclick=x2.onclick=inp.onkeydown=null;res(v)}
-  $("mok").onclick=function(){close(o.input?inp.value:o.area?ta.value:("ok"))};
-  $("mx").onclick=function(){close(null)};
-  x2.onclick=function(){var v=ta.value;ta.select();try{document.execCommand("copy")}catch(e){}try{navigator.clipboard.writeText(v)}catch(e){}close({extra:v})};
-  inp.onkeydown=function(e){if(e.key==="Enter")$("mok").onclick()};
-})}
+  $("mmsg").textContent=o.msg||"";
+  inp.hidden=!o.input;ta.hidden=!o.area;
+  inp.value=o.input?(o.def||""):"";ta.value=o.area?(o.def||""):"";
+  btns.innerHTML="";
+  return new Promise(function(res){
+    var done=false;
+    function close(v){if(done)return;done=true;m.hidden=true;btns.innerHTML="";res(v)}
+    function addBtn(label,cls,value){
+      var b=document.createElement("button");b.type="button";b.textContent=label;
+      if(cls)b.className=cls;
+      b.onclick=function(){close(value)};
+      btns.appendChild(b);return b;
+    }
+    if(o.buttons&&o.buttons.length){
+      o.buttons.forEach(function(x){addBtn(x.label,x.primary?"primary":"",x.value)});
+    }else{
+      addBtn(o.cancel||"Vazgeç","",null);
+      if(o.extra)addBtn(o.extra,"",{extra:true});
+      addBtn(o.ok||"Tamam","primary","ok");
+    }
+    inp.onkeydown=function(e){if(e.key==="Enter"){e.preventDefault();close(o.input?inp.value:"ok")}};
+    m.hidden=false;
+    try{(o.input?inp:o.area?ta:btns.firstChild).focus()}catch(e){}
+    if(o.input)try{inp.select()}catch(e){}
+  });
+}
+function dlg(o){return openModal(o).then(function(v){return v})}
 function parse(s){
   s=String(s).replace(/[\s\u00a0\u20ba]/g,"");if(!s)return null;
   s=s.replace(/[Tt][Ll]$/,"");if(!s)return null;
@@ -232,8 +249,12 @@ function add(){
   note("");
   var dup=findByName(cur(),n,null);
   if(dup){
-    dlg({msg:"“"+n+"” bu listede zaten var — kayıtlı tutar: "+money(dup.k)+". Ne yapmak istersiniz?",ok:"Güncelle",cancel:"Vazgeç",extra:"Yeni satır ekle"}).then(function(c){
-      if(c===null)return;
+    openModal({msg:"“"+n+"” bu listede zaten var — kayıtlı tutar: "+money(dup.k)+". Ne yapmak istersiniz?",buttons:[
+      {label:"Vazgeç",value:null},
+      {label:"Yeni satır ekle",value:"new"},
+      {label:"Güncelle",value:"ok",primary:true}
+    ]}).then(function(c){
+      if(c===null||c===undefined)return;
       if(c!=="ok"){ /* "Yeni satır ekle" */
         cur().items.push({n:n,k:k});save();clearEntry();render(true);note("Ayrı satır olarak eklendi");
         return;
@@ -301,83 +322,70 @@ function backupText(){
   return lines.join("\r\n")+"\r\n";
 }
 function doBackup(){
-  var name="bagis-yedek-"+stamp()+".json",txt=JSON.stringify(backupPayload(),null,2);
-  /* 1) Android köprüsü varsa doğrudan İndirilenler klasörüne yaz */
+  var name="bagis-yedek-"+stamp()+".json";
+  var txt;
+  try{txt=JSON.stringify(backupPayload(),null,2)}
+  catch(e){note("Yedek oluşturulamadı: "+e.message,1);return}
+  var L=data.lists.length, kisi=0;
+  data.lists.forEach(function(x){kisi+=x.items.length});
+  /* 1) Android köprüsü: doğrudan İndirilenler klasörüne yaz (sayfa yenilenmez) */
+  var bridgeError="";
   try{
-    var br=(window.BagisBackup&&typeof window.BagisBackup.saveToDownloads==="function")?window.BagisBackup
-          :(window.AndroidBackup&&typeof window.AndroidBackup.saveToDownloads==="function")?window.AndroidBackup:null;
+    var br=(window.BagisBackup&&typeof window.BagisBackup.saveToDownloads==="function")?window.BagisBackup:null;
     if(br){
       var ok=br.saveToDownloads(name,txt);
-      if(ok===true||ok==="true"){note("İndirilenler klasörüne kaydedildi: "+name);return}
+      if(ok===true||ok==="true"){
+        note("Yedek kaydedildi: "+name+" ("+L+" liste, "+kisi+" kişi) → İndirilenler");
+        return;
+      }
+      bridgeError="uygulama köprüsü yazamadı";
     }
-  }catch(e){}
-  /* 2) tarayıcıda: indirme bağlantısı */
+  }catch(e){bridgeError=(e&&e.message)||"köprü hatası"}
+  /* 2) tarayıcı / yedek: indirme bağlantısı */
   try{
     var blob=new Blob([txt],{type:"application/json;charset=utf-8"});
     var url=URL.createObjectURL(blob);
     var a=document.createElement("a");
-    a.href=url;
-    a.download=name;a.rel="noopener";
+    a.href=url;a.download=name;a.rel="noopener";
     document.body.appendChild(a);a.click();document.body.removeChild(a);
-    setTimeout(function(){URL.revokeObjectURL(url)},2000);
-    note("İndirilenler klasörüne kaydedildi: "+name);
-  }catch(e){note("Dosya indirilemedi",1)}
+    setTimeout(function(){try{URL.revokeObjectURL(url)}catch(e){}},2000);
+    note("Yedek indirildi: "+name+" ("+L+" liste, "+kisi+" kişi)");
+  }catch(e){
+    note("Yedek kaydedilemedi"+(bridgeError?" ("+bridgeError+")":"")+". Yedeği metin olarak kopyalayıp bir yere yapıştırabilirsiniz.",1);
+  }
 }
 function doRestore(){
   keepScroll=$("main").scrollTop;
-  /* uygulama içinde: MainActivity'nin dosya seçicisi (sonuç window.restoreBagisBackup'a döner) */
+  /* 1) Android dosya seçici köprüsü */
   try{
-    if(window.BagisBackup&&typeof window.BagisBackup.chooseBackup==="function"){
-      window.BagisBackup.chooseBackup();
+    if(window.BagisFile&&typeof window.BagisFile.pick==="function"){
+      note("Dosya seçici açılıyor…");
+      window.BagisFile.pick();
       return;
     }
   }catch(e){}
-  var inp=$("file")||$("filepick");
-  if(!inp){note("Bu sürümde dosya seçici yok; uygulama içinden 'Yedekten geri yükle' kullanın.",1);return}
+  /* 2) tarayıcı: dosya girdisi */
+  var inp=$("file");
+  if(!inp){note("Bu sürümde dosya seçici yok.",1);return}
   inp.value="";
   inp.onchange=function(){
     var f=this.files&&this.files[0];if(!f)return;
     var fr=new FileReader();
-    fr.onload=function(){
-      var raw=String(fr.result||"");
-      var multi=parseMultiBackup(raw);
-      /* birden çok liste içeren yedek: her liste kendi adıyla geri yüklenir */
-      if(multi.length>1){
-        var isimler=multi.map(function(x){return "• "+x.name+" ("+x.items.length+" kişi)"}).join("\n");
-        dlg({msg:multi.length+" liste bulundu:\n"+isimler+"\n\nHer liste kendi adıyla geri yüklenecek. Aynı adlı liste varsa içeriği yedekle değiştirilir.",ok:"Geri yükle",cancel:"Vazgeç"}).then(function(c){
-          if(c===null)return;
-          var yeni=0,gunc=0;
-          multi.forEach(function(bk){
-            var ex=null;for(var i=0;i<data.lists.length;i++)if(norm(data.lists[i].name)===norm(bk.name))ex=data.lists[i];
-            if(ex){ex.items=bk.items;gunc++}
-            else{data.lists.push({id:uid(),name:bk.name,items:bk.items});yeni++}
-          });
-          save();$("q").value="";render(false);
-          note(yeni+" liste eklendi, "+gunc+" liste güncellendi");
-        });
-        return;
-      }
-      var parsed=multi.length?multi[0].items:parseBackup(raw);
-      if(!parsed.length){note("Dosyada okunabilir satır bulunamadı.",1);return}
-      var nm=multi.length?multi[0].name:(f.name||"").replace(/\.txt$/i,"");
-      dlg({msg:parsed.length+" satır bulundu. Nereye yüklensin?",ok:"Bu listeye ekle",cancel:"Vazgeç",extra:"Yeni liste aç"}).then(function(c){
-        if(c===null)return;
-        if(c!=="ok"){ /* yeni liste */
-          var id=uid();data.lists.push({id:id,name:nm||defName(),items:parsed});data.cur=id;
-          save();$("q").value="";render(false);note("Yeni liste oluşturuldu: "+parsed.length+" satır");return;
-        }
-        var L=cur(),eklendi=0,guncellendi=0;
-        parsed.forEach(function(p){
-          var d=findByName(L,p.n,null);
-          if(d){d.k=p.k;guncellendi++}else{L.items.push(p);eklendi++}
-        });
-        save();render(false);note(eklendi+" eklendi, "+guncellendi+" güncellendi");
-      });
-    };
+    fr.onerror=function(){note("Dosya okunamadı.",1)};
+    fr.onload=function(){applyRestore(String(fr.result||""),f.name||"")};
     fr.readAsText(f,"UTF-8");
   };
   inp.click();
 }
+/* Dosya seçici iptal edilirse ya da okunamazsa Android tarafı bunu çağırır */
+window.bagisPickerFailed=function(){note("Geri yükleme için dosya seçilmedi.",1)};
+/* Android yedek dosyasını okuduğunda bunu çağırır */
+window.bagisRestore=function(contents){
+  try{return applyRestore(String(contents||""),"")}
+  catch(e){note("Yedek geri yüklenemedi: "+e.message,1)}
+};
+/* Eski ad: geriye dönük uyumluluk */
+window.restoreBagisBackup=window.bagisRestore;
 /* MainActivity yedek dosyasını okuduğunda bunu çağırır */
 window.restoreBagisBackup=function(contents){
   try{return applyRestore(String(contents||""),"")}
@@ -418,8 +426,12 @@ function applyRestore(raw,fileName){
   var nm=parsed[0].name||(fileName||"").replace(/\.[tj]xt$/i,"")||defName();
   var toplamSatir=parsed.reduce(function(a,x){return a+x.items.length},0);
   var ozet=parsed.map(function(x){return "• "+x.name+" ("+x.items.length+" kişi)"}).join("\n");
-  return dlg({msg:toplamSatir+" satır bulundu:\n"+ozet+"\n\nNereye yüklensin?",ok:"Bu listeye ekle",cancel:"Vazgeç",extra:"Yeni liste aç"}).then(function(c){
-    if(c===null)return;
+  return openModal({msg:toplamSatir+" satır bulundu:\n"+ozet+"\n\nNereye yüklensin?",buttons:[
+    {label:"Vazgeç",value:null},
+    {label:"Yeni liste aç",value:"new"},
+    {label:"Bu listeye ekle",value:"ok",primary:true}
+  ]}).then(function(c){
+    if(c===null||c===undefined)return;
     if(c!=="ok"){
       var id=uid();
       data.lists.push({id:id,name:nm,items:parsed[0].items});
@@ -461,8 +473,12 @@ function applyFullBackup(payload){
   var toplam=lists.reduce(function(a,L){return a+L.items.length},0);
   var ozet=lists.map(function(L){return "• "+L.name+" ("+L.items.length+" kişi)"}).join("\n");
   var msg=toplam+" satır, "+lists.length+" liste bulundu"+(payload.savedAt?("\nYedek tarihi: "+new Date(payload.savedAt).toLocaleString("tr-TR")):"")+":\n"+ozet+"\n\nNasıl geri yüklensin?";
-  return dlg({msg:msg,ok:"Hepsini birleştir",cancel:"Vazgeç",extra:"Yedekle değiştir"}).then(function(c){
-    if(c===null)return;
+  return openModal({msg:msg,buttons:[
+    {label:"Vazgeç",value:null},
+    {label:"Yedekle değiştir",value:"replace"},
+    {label:"Hepsini birleştir",value:"ok",primary:true}
+  ]}).then(function(c){
+    if(c===null||c===undefined)return;
     var yeni=0,gunc=0;
     if(c!=="ok"){
       /* Yedekle değiştir: mevcut tüm listeler yedektekiyle birebir değişir */
@@ -541,17 +557,18 @@ function parseBackup(text){
 }
 /* Yedek menüsü: Kopyala | Dosyaya kaydet | Dosyadan geri yükle */
 function backupMenu(){
-  return new Promise(function(res){
-    var m=$("modal"),inp=$("min"),ta=$("mta");
-    inp.hidden=true;ta.hidden=true;$("mx2").hidden=true;
-    $("mmsg").textContent="Yedekleme";
-    var btns=$("mbtns");btns.innerHTML="";
-    function mk(label,primary,fn){var b=document.createElement("button");b.type="button";b.textContent=label;if(primary)b.id="mok";b.onclick=function(){m.hidden=true;fn()};btns.appendChild(b)}
-    mk("Kapat",false,function(){res(null)});
-    mk("Dosyadan geri yükle",false,function(){res(null);doRestore()});
-    mk("Dosyaya kaydet (.json)",false,function(){res(null);doBackup()});
-    mk("Metin olarak kopyala",true,function(){res(null);copyBackup()});
-    m.hidden=false;
+  return openModal({
+    msg:"Yedekleme",
+    buttons:[
+      {label:"Kapat",value:null},
+      {label:"Dosyadan geri yükle",value:"restore"},
+      {label:"Dosyaya kaydet (.json)",value:"save"},
+      {label:"Metin olarak kopyala",value:"copy",primary:true}
+    ]
+  }).then(function(c){
+    if(c==="restore")doRestore();
+    else if(c==="save")doBackup();
+    else if(c==="copy")copyBackup();
   });
 }
 function copyBackup(){

@@ -1,7 +1,5 @@
 package com.example.bagis
 
-import android.app.Activity
-import android.content.ContentValues
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -21,14 +19,21 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.webkit.WebViewAssetLoader
 import org.json.JSONObject
 
+/**
+ * Uygulamanın tüm mantığı assets/index.html içindedir.
+ * Bu sınıf yalnızca iki köprü sağlar:
+ *  - BagisBackup.saveToDownloads : yedeği İndirilenler klasörüne yazar (sayfa yenilenmez)
+ *  - BagisFile.pick             : geri yükleme için dosya seçer
+ */
 class MainActivity : AppCompatActivity() {
     private lateinit var web: WebView
 
-    private val documentPicker = registerForActivityResult(
+    private val filePicker = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         val uri = result.data?.data
-        if (result.resultCode != Activity.RESULT_OK || uri == null) {
+        if (result.resultCode != RESULT_OK || uri == null) {
+            notifyPickerFailed()
             return@registerForActivityResult
         }
         readBackup(uri)
@@ -51,7 +56,10 @@ class MainActivity : AppCompatActivity() {
 
         web.settings.javaScriptEnabled = true
         web.settings.domStorageEnabled = true
+        web.settings.allowFileAccess = false
+        web.settings.allowContentAccess = true
         web.addJavascriptInterface(BackupBridge(), "BagisBackup")
+        web.addJavascriptInterface(FileBridge(), "BagisFile")
         web.webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                 return loader.shouldInterceptRequest(request.url)
@@ -61,36 +69,50 @@ class MainActivity : AppCompatActivity() {
     }
 
     private inner class BackupBridge {
-        /** Yedeği doğrudan İndirilenler klasörüne yazar (web arayüzü bunu çağırır). */
+        /** Yedeği doğrudan İndirilenler klasörüne yazar; sonucu döner. Sayfa yenilenmez. */
         @JavascriptInterface
         fun saveToDownloads(fileName: String, contents: String): Boolean {
             return try {
+                val name = safeName(fileName)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    val values = ContentValues().apply {
-                        put(MediaStore.MediaColumns.DISPLAY_NAME, safeName(fileName))
+                    val values = android.content.ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, name)
                         put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
                         put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                        put(MediaStore.MediaColumns.IS_PENDING, 1)
                     }
                     val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                        ?: return false
-                    contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { it.write(contents) }
-                        ?: return false
-                    true
+                    if (uri == null) {
+                        false
+                    } else {
+                        val ok = contentResolver.openOutputStream(uri)?.use { out ->
+                            out.write(contents.toByteArray(Charsets.UTF_8))
+                            true
+                        } ?: false
+                        values.clear()
+                        values.put(MediaStore.MediaColumns.IS_PENDING, if (ok) 0 else 1)
+                        contentResolver.update(uri, values, null, null)
+                        if (!ok) contentResolver.delete(uri, null, null)
+                        ok
+                    }
                 } else {
                     @Suppress("DEPRECATION")
                     val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
                     if (!dir.exists()) dir.mkdirs()
-                    java.io.FileOutputStream(java.io.File(dir, safeName(fileName)))
-                        .use { it.write(contents.toByteArray(Charsets.UTF_8)) }
+                    java.io.FileOutputStream(java.io.File(dir, name)).use {
+                        it.write(contents.toByteArray(Charsets.UTF_8))
+                    }
                     true
                 }
             } catch (e: Exception) {
                 false
             }
         }
+    }
 
+    private inner class FileBridge {
         @JavascriptInterface
-        fun chooseBackup() {
+        fun pick() {
             runOnUiThread {
                 val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
@@ -101,12 +123,17 @@ class MainActivity : AppCompatActivity() {
                     )
                 }
                 try {
-                    documentPicker.launch(intent)
+                    filePicker.launch(intent)
                 } catch (e: Exception) {
                     toast("Dosya seçici açılamadı: ${e.localizedMessage ?: "bilinmeyen hata"}")
+                    notifyPickerFailed()
                 }
             }
         }
+    }
+
+    private fun notifyPickerFailed() {
+        runCatching { web.evaluateJavascript("window.bagisPickerFailed&&window.bagisPickerFailed();", null) }
     }
 
     private fun safeName(fileName: String): String {
@@ -118,14 +145,15 @@ class MainActivity : AppCompatActivity() {
     private fun readBackup(uri: Uri) {
         try {
             val contents = contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
-                ?: error("Dosya okunamadı")
-            if (contents.isBlank()) {
+            if (contents.isNullOrBlank()) {
                 toast("Seçilen dosya boş")
+                notifyPickerFailed()
                 return
             }
-            web.evaluateJavascript("window.restoreBagisBackup(${JSONObject.quote(contents)});", null)
+            web.evaluateJavascript("window.bagisRestore(${JSONObject.quote(contents)});", null)
         } catch (e: Exception) {
             toast("Yedek okunamadı: ${e.localizedMessage ?: "Bilinmeyen hata"}")
+            notifyPickerFailed()
         }
     }
 
