@@ -46,6 +46,17 @@ input#amount{text-align:right}
 .total.all{background:transparent;color:var(--muted);border-top:1px solid var(--line);padding:8px 16px;margin-top:0}
 .total.all .sum{font-size:17px;font-weight:600;color:var(--ink)}
 .total.all .lbl{font-size:13px}
+.total.all.tap{cursor:pointer}
+.total.all.tap:hover{background:rgba(127,127,127,.08)}
+.total.all .chev{font-size:18px;font-weight:700;margin-left:8px;opacity:.6}
+.total.all .lbl{flex:1;text-align:left}
+.plist{display:flex;flex-direction:column;gap:2px;max-height:60vh;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:6px}
+.prow{display:grid;grid-template-columns:1fr auto;gap:8px;padding:8px 6px;border-top:1px solid var(--line)}
+.prow:first-child{border-top:0}
+.prow .pn{font-weight:600;overflow-wrap:anywhere}
+.prow .pk{font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap}
+.prow .pd{grid-column:1/-1;color:var(--muted);font-size:12px;line-height:1.45}
+.plist .empty2{padding:14px;text-align:center;color:var(--muted);font-size:14px}
 .msg{font-size:13px;min-height:18px;padding:4px 2px 0;color:var(--muted)}
 .msg.bad{color:var(--danger)}
 .tools{display:flex;flex-wrap:wrap;gap:4px 14px;padding:0 12px 6px;justify-content:flex-end}
@@ -83,7 +94,7 @@ input#amount{text-align:right}
   </div>
   <div class="msg" id="err" role="status"></div>
   <div class="total"><span class="lbl" id="lbl">Toplam</span><span class="sum" id="sum">0,00 ₺</span></div>
-  <div class="total all"><span class="lbl" id="albl">Genel toplam</span><span class="sum" id="asum">0,00 ₺</span></div>
+  <div class="total all tap" id="allbox" role="button" tabindex="0" aria-label="Genel toplam listesini aç"><span class="lbl" id="albl">Genel toplam</span><span class="sum" id="asum">0,00 ₺</span><span class="chev" aria-hidden="true">›</span></div>
 </div>
 <div id="modal" hidden><div class="box" role="dialog" aria-modal="true">
   <p id="mmsg"></p><input id="min" type="text" autocomplete="off"><textarea id="mta"></textarea>
@@ -555,6 +566,140 @@ function parseBackup(text){
   }
   return out;
 }
+/* --- genel toplam listesi: aynı isimli kişiler tüm listelerde toplanır --- */
+/* Türkçe isim karşılaştırması: büyük/küçük harf ve fazla boşluk farkı yok sayılır. */
+function personKey(n){return norm(n).replace(/\s+/g," ")}
+function collectPeople(){
+  var map={},sira=[];
+  data.lists.forEach(function(L){
+    L.items.forEach(function(it){
+      var key=personKey(it.n);
+      if(!key)return;
+      var p=map[key];
+      if(!p){
+        p={key:key,name:String(it.n).trim(),total:0,count:0,lists:[]};
+        map[key]=p;sira.push(key);
+      }
+      p.total+=it.k;p.count++;
+      var ex=null;
+      for(var i=0;i<p.lists.length;i++)if(p.lists[i].name===L.name)ex=p.lists[i];
+      if(ex)ex.k+=it.k;
+      else p.lists.push({name:L.name,k:it.k});
+    });
+  });
+  return sira.map(function(k){return map[k]});
+}
+function peopleTotal(people){
+  var t=0;people.forEach(function(p){t+=p.total});return t;
+}
+function openGeneralTotal(){
+  var people=collectPeople();
+  if(!people.length){note("Henüz hiç kayıt yok.",1);return}
+  people.sort(function(a,b){return b.total-a.total||a.name.localeCompare(b.name,"tr")});
+  var toplam=peopleTotal(people);
+  var kisi=0;data.lists.forEach(function(L){kisi+=L.items.length});
+  var tekrar=0;people.forEach(function(p){if(p.lists.length>1)tekrar++});
+
+  var box=document.createElement("div");
+  box.className="box";
+
+  var h=document.createElement("p");
+  h.innerHTML="";
+  h.appendChild(document.createTextNode("Genel toplam — "));
+  var b=document.createElement("b");b.textContent=money(toplam);h.appendChild(b);
+  box.appendChild(h);
+
+  var sub=document.createElement("p");
+  sub.style.cssText="color:var(--muted);font-size:13px;margin:0";
+  sub.textContent=data.lists.length+" liste, "+kisi+" kayıt, "+people.length+" kişi"
+    +(tekrar?" — "+tekrar+" kişi birden fazla listede toplandı":"");
+  box.appendChild(sub);
+
+  var search=document.createElement("input");
+  search.type="search";search.placeholder="Kişide ara…";search.setAttribute("autocomplete","off");
+  box.appendChild(search);
+
+  var list=document.createElement("div");
+  list.className="plist";
+  box.appendChild(list);
+
+  function draw(filter){
+    var f=filter?norm(filter):"";
+    list.innerHTML="";
+    var shown=0;
+    people.forEach(function(p){
+      if(f&&norm(p.name).indexOf(f)<0)return;
+      shown++;
+      var row=document.createElement("div");row.className="prow";
+      var nm=document.createElement("div");nm.className="pn";nm.textContent=p.name;
+      var pk=document.createElement("div");pk.className="pk";pk.textContent=money(p.total);
+      var pd=document.createElement("div");pd.className="pd";
+      pd.textContent=p.lists.map(function(x){return x.name+": "+money(x.k)}).join("  •  ");
+      row.appendChild(nm);row.appendChild(pk);row.appendChild(pd);
+      list.appendChild(row);
+    });
+    if(!shown){var e=document.createElement("div");e.className="empty2";e.textContent="Eşleşen kişi yok.";list.appendChild(e)}
+  }
+  search.oninput=function(){draw(this.value)};
+  draw("");
+
+  var btns=document.createElement("div");btns.className="btns";
+  var copyBtn=document.createElement("button");copyBtn.type="button";copyBtn.textContent="Listeyi kopyala";
+  copyBtn.onclick=function(){
+    var f=norm(search.value||"");
+    var tx=["Genel toplam: "+money(toplam)];
+    people.forEach(function(p){
+      if(f&&norm(p.name).indexOf(f)<0)return;
+      tx.push(p.name+": "+money(p.total)+"  ("+p.lists.map(function(x){return x.name+": "+money(x.k)}).join(", ")+")");
+    });
+    copyText(tx.join("\n"),"Genel toplam listesi kopyalandı");
+  };
+  var closeBtn=document.createElement("button");closeBtn.type="button";closeBtn.className="primary";closeBtn.textContent="Kapat";
+  closeBtn.onclick=function(){m.hidden=true};
+  btns.appendChild(copyBtn);btns.appendChild(closeBtn);
+  box.appendChild(btns);
+
+  var m=$("modal");
+  var oldBox=m.querySelector(".box");
+  if(oldBox)m.removeChild(oldBox);
+  m.appendChild(box);
+  m.hidden=false;
+  try{search.focus()}catch(e){}
+}
+/* Panoya kopyalama: eski ve yeni yöntem birlikte denenir */
+function copyText(text,okMsg){
+  okMsg=okMsg||"Kopyalandı";
+  /* 1) modern pano API'si */
+  try{
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(function(){note(okMsg)},function(){legacyCopy(text,okMsg)});
+      return;
+    }
+  }catch(e){}
+  legacyCopy(text,okMsg);
+}
+/* 2) eski yöntem: gizli alan + execCommand("copy") — WebView'da daha güvenilir */
+function legacyCopy(text,okMsg){
+  try{
+    var ta=document.createElement("textarea");
+    ta.value=text;
+    ta.setAttribute("readonly","");
+    ta.style.position="fixed";ta.style.top="-1000px";ta.style.opacity="0";
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0,text.length);
+    var ok=document.execCommand("copy");
+    document.body.removeChild(ta);
+    if(ok){note(okMsg);return}
+  }catch(e){}
+  note("Kopyalanamadı — metni elle seçebilirsiniz.",1);
+}
+function setupGeneralTotal(){
+  var box=$("allbox");
+  if(!box)return;
+  box.onclick=openGeneralTotal;
+  box.onkeydown=function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();openGeneralTotal()}};
+}
 /* Yedek menüsü: Kopyala | Dosyaya kaydet | Dosyadan geri yükle */
 function backupMenu(){
   return openModal({
@@ -577,6 +722,7 @@ function copyBackup(){
   try{navigator.clipboard.writeText(tx).then(function(){note("Yedek kopyalandı")},function(){note("Kopyalanamadı",1)})}catch(e){note("Kopyalanamadı",1)}
 }
 $("bak").onclick=backupMenu;
+setupGeneralTotal();
 save();render(false);
 </script>
 </body>

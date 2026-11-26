@@ -40,7 +40,20 @@ Yedek tarihi ve liste özeti gösterilir, sonra üç seçenek:
 Eski `.txt` yedekleri (`İsim | Tutar`, `## Liste:` başlıkları) ve eski
 `bagis-listesi-backup-v1` JSON yedekleri de okunur.
 
+## Genel toplam listesi
+
+Alt kısımdaki **Genel toplam** satırına dokununca kişi bazlı toplam listesi açılır:
+
+- Aynı isimli kişiler **tüm listelerde toplanır** (büyük/küçük harf ve fazla boşluk
+  farkı yok sayılır; "Ayşe", "ayşe " ve "AYŞE" aynı kişidir).
+- Her satırda kişinin toplamı ve hangi listede ne kadar verdiği yazar:
+  `Ayşe — 8.510,00 ₺` / `Kasım 2026: 3.500,00 ₺ • Aralık 2026: 5.000,00 ₺`
+- Tutara göre büyükten küçüğe sıralıdır, içinde arama kutusu vardır.
+- **Listeyi kopyala** ile tüm toplamlar panoya alınır.
+
 ## Sürüm notları
+
+- **1.3** — Genel toplam listesi eklendi (kişi bazlı, tüm listeleri toplar).
 
 - **1.2** — Yedek butonunun "bir kez çalışıp susması" düzeltildi: modal artık her
   açılışta sıfırdan kuruluyor, butonlara sabit `id` verilmiyor (aynı `id`'nin iki kez
