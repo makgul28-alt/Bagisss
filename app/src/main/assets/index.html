@@ -264,10 +264,29 @@ $("copy").onclick=function(){
   var tx=it.map(function(x){return x.n+": "+fmt.format(x.k/100)}).join("\n")+"\nToplam= "+fmt.format(it.reduce(function(s,x){return s+x.k},0)/100);
   try{navigator.clipboard.writeText(tx).then(function(){note("Kopyalandı")},function(){note("Kopyalanamadı",1)})}catch(e){note("Kopyalanamadı",1)}
 };
-/* --- dosyaya .txt yedek / dosyadan geri yükle --- */
+/* --- yedek / geri yükleme ---
+   Tek format: JSON (format="bagis-listesi-backup-v2"), tüm listeler.
+   Eski .txt yedekleri geri yüklerken hâlâ okunur. */
+var BACKUP_FORMAT="bagis-listesi-backup-v2";
 function stamp(){var d=new Date();function p(x){return (x<10?"0":"")+x}
   return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+"-"+p(d.getHours())+p(d.getMinutes())}
 function safeName(s){return String(s).replace(/[\\/:*?"<>|]/g,"_").replace(/\s+/g," ").trim()||"liste"}
+/* Tüm listeleri tek JSON yedeğine yazar; hiçbir liste dışarıda kalmaz. */
+function backupPayload(){
+  return {
+    format: BACKUP_FORMAT,
+    app: "BagisListesi",
+    version: 1,
+    savedAt: new Date().toISOString(),
+    current: (function(){var L=cur();return L?L.name:""})(),
+    lists: data.lists.map(function(L){
+      return {
+        name: L.name,
+        items: L.items.map(function(x){return {n:x.n,k:x.k}})
+      };
+    })
+  };
+}
 function backupText(){
   var L=cur();
   var lines=[
@@ -282,22 +301,25 @@ function backupText(){
   return lines.join("\r\n")+"\r\n";
 }
 function doBackup(){
-  var name="bagis-"+safeName(cur().name)+"-"+stamp()+".txt",txt=backupText();
+  var name="bagis-yedek-"+stamp()+".json",txt=JSON.stringify(backupPayload(),null,2);
   /* 1) Android köprüsü varsa doğrudan İndirilenler klasörüne yaz */
   try{
     var br=(window.BagisBackup&&typeof window.BagisBackup.saveToDownloads==="function")?window.BagisBackup
           :(window.AndroidBackup&&typeof window.AndroidBackup.saveToDownloads==="function")?window.AndroidBackup:null;
-    if(br&&br.saveToDownloads(name,txt)===true){
-      note("İndirilenler klasörüne kaydedildi: "+name);
-      return;
+    if(br){
+      var ok=br.saveToDownloads(name,txt);
+      if(ok===true||ok==="true"){note("İndirilenler klasörüne kaydedildi: "+name);return}
     }
   }catch(e){}
   /* 2) tarayıcıda: indirme bağlantısı */
   try{
+    var blob=new Blob([txt],{type:"application/json;charset=utf-8"});
+    var url=URL.createObjectURL(blob);
     var a=document.createElement("a");
-    a.href="data:text/plain;charset=utf-8,"+encodeURIComponent(txt);
+    a.href=url;
     a.download=name;a.rel="noopener";
     document.body.appendChild(a);a.click();document.body.removeChild(a);
+    setTimeout(function(){URL.revokeObjectURL(url)},2000);
     note("İndirilenler klasörüne kaydedildi: "+name);
   }catch(e){note("Dosya indirilemedi",1)}
 }
@@ -358,7 +380,7 @@ function doRestore(){
 }
 /* MainActivity yedek dosyasını okuduğunda bunu çağırır */
 window.restoreBagisBackup=function(contents){
-  try{applyRestore(String(contents||""),"")}
+  try{return applyRestore(String(contents||""),"")}
   catch(e){note("Yedek geri yüklenemedi: "+e.message,1)}
 };
 /* Eski sürümün JSON yedeği: {format, list:{name, items:[{name, amountKurus}]}} */
@@ -373,11 +395,27 @@ window.__bagisJsonBackup=function(obj){
 };
 /* Yedek metnini uygular. Android köprüsü ve dosya seçici buradan geçer. */
 function applyRestore(raw,fileName){
+  var payload=parseFullBackup(raw);
+  if(payload)return applyFullBackup(payload);
   var parsed=parseMultiBackup(raw);
-  if(!parsed.length)parsed=parseBackup(raw).length?[{name:(fileName||"").replace(/\.txt$/i,"")||defName(),items:parseBackup(raw)}]:[];
+  if(!parsed.length)parsed=parseBackup(raw).length?[{name:(fileName||"").replace(/\.[tj]xt$/i,"")||defName(),items:parseBackup(raw)}]:[];
   if(!parsed.length){note("Dosyada okunabilir satır bulunamadı.",1);return}
-  var tek=parsed.length===1;
-  var nm=parsed[0].name||(fileName||"").replace(/\.txt$/i,"")||defName();
+  /* Birden çok liste içeren metin yedeği: her liste kendi adıyla geri yüklenir */
+  if(parsed.length>1){
+    var ozetCok=parsed.map(function(x){return "• "+x.name+" ("+x.items.length+" kişi)"}).join("\n");
+    return dlg({msg:parsed.length+" liste bulundu:\n"+ozetCok+"\n\nHer liste kendi adıyla geri yüklenecek. Aynı adlı liste varsa içeriği yedekle değiştirilir.",ok:"Geri yükle",cancel:"Vazgeç"}).then(function(c){
+      if(c===null)return;
+      var yeniC=0,guncC=0;
+      parsed.forEach(function(bk){
+        var ex=null;for(var i=0;i<data.lists.length;i++)if(norm(data.lists[i].name)===norm(bk.name))ex=data.lists[i];
+        if(ex){ex.items=bk.items.slice();guncC++}
+        else{data.lists.push({id:uid(),name:bk.name,items:bk.items.slice()});yeniC++}
+      });
+      save();$("q").value="";render(false);
+      note(yeniC+" liste eklendi, "+guncC+" liste güncellendi");
+    });
+  }
+  var nm=parsed[0].name||(fileName||"").replace(/\.[tj]xt$/i,"")||defName();
   var toplamSatir=parsed.reduce(function(a,x){return a+x.items.length},0);
   var ozet=parsed.map(function(x){return "• "+x.name+" ("+x.items.length+" kişi)"}).join("\n");
   return dlg({msg:toplamSatir+" satır bulundu:\n"+ozet+"\n\nNereye yüklensin?",ok:"Bu listeye ekle",cancel:"Vazgeç",extra:"Yeni liste aç"}).then(function(c){
@@ -398,6 +436,55 @@ function applyRestore(raw,fileName){
     });
     save();$("q").value="";render(false);
     note(eklendi+" eklendi, "+guncellendi+" güncellendi");
+  });
+}
+/* --- tam yedek (tüm listeler, JSON) --- */
+function parseFullBackup(text){
+  var j=null;
+  try{j=JSON.parse(String(text))}catch(e){return null}
+  if(!j||!Array.isArray(j.lists)||!j.lists.length)return null;
+  var ok=true,lists=[];
+  j.lists.forEach(function(L){
+    if(!L||typeof L.name!=="string"||!L.name.trim()||!Array.isArray(L.items)){ok=false;return}
+    var items=[];
+    L.items.forEach(function(x){
+      if(!x||typeof x.n!=="string"||!x.n.trim()||!Number.isSafeInteger(x.k)||x.k<=0){ok=false;return}
+      items.push({n:x.n.trim(),k:x.k});
+    });
+    lists.push({name:L.name.trim(),items:items});
+  });
+  if(!ok||!lists.length)return null;
+  return {lists:lists,current:(typeof j.current==="string"?j.current:""),savedAt:j.savedAt||""};
+}
+function applyFullBackup(payload){
+  var lists=payload.lists;
+  var toplam=lists.reduce(function(a,L){return a+L.items.length},0);
+  var ozet=lists.map(function(L){return "• "+L.name+" ("+L.items.length+" kişi)"}).join("\n");
+  var msg=toplam+" satır, "+lists.length+" liste bulundu"+(payload.savedAt?("\nYedek tarihi: "+new Date(payload.savedAt).toLocaleString("tr-TR")):"")+":\n"+ozet+"\n\nNasıl geri yüklensin?";
+  return dlg({msg:msg,ok:"Hepsini birleştir",cancel:"Vazgeç",extra:"Yedekle değiştir"}).then(function(c){
+    if(c===null)return;
+    var yeni=0,gunc=0;
+    if(c!=="ok"){
+      /* Yedekle değiştir: mevcut tüm listeler yedektekiyle birebir değişir */
+      data.lists=lists.map(function(L){return {id:uid(),name:L.name,items:L.items.slice()}});
+      var hedef=null;
+      for(var i=0;i<data.lists.length;i++)if(norm(data.lists[i].name)===norm(payload.current))hedef=data.lists[i];
+      data.cur=(hedef||data.lists[0]).id;
+      save();$("q").value="";render(false);
+      note(lists.length+" liste yedekten geri yüklendi ("+toplam+" satır)");
+      return;
+    }
+    lists.forEach(function(bk){
+      var ex=null;for(var i=0;i<data.lists.length;i++)if(norm(data.lists[i].name)===norm(bk.name))ex=data.lists[i];
+      if(!ex){ex={id:uid(),name:bk.name,items:[]};data.lists.push(ex);yeni++}
+      else gunc++;
+      bk.items.forEach(function(p){
+        var d=findByName(ex,p.n,null);
+        if(d)d.k=p.k;else ex.items.push({n:p.n,k:p.k});
+      });
+    });
+    save();$("q").value="";render(false);
+    note(yeni+" liste eklendi, "+gunc+" liste birleştirildi");
   });
 }
 function parseMultiBackup(text){
@@ -462,7 +549,7 @@ function backupMenu(){
     function mk(label,primary,fn){var b=document.createElement("button");b.type="button";b.textContent=label;if(primary)b.id="mok";b.onclick=function(){m.hidden=true;fn()};btns.appendChild(b)}
     mk("Kapat",false,function(){res(null)});
     mk("Dosyadan geri yükle",false,function(){res(null);doRestore()});
-    mk("Dosyaya kaydet (.txt)",false,function(){res(null);doBackup()});
+    mk("Dosyaya kaydet (.json)",false,function(){res(null);doBackup()});
     mk("Metin olarak kopyala",true,function(){res(null);copyBackup()});
     m.hidden=false;
   });
