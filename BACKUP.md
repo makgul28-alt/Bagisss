@@ -53,6 +53,10 @@ Alt kısımdaki **Genel toplam** satırına dokununca kişi bazlı toplam listes
 
 ## Sürüm notları
 
+- **1.4** — Pencere (modal) yapısı baştan yazıldı: her pencere açılışta sıfırdan
+  kuruluyor, kapanınca tamamen siliniyor. Böylece genel toplam listesinden
+  çıktıktan sonra Yedek menüsünün açılmaması sorunu bitti; tüm onay pencereleri
+  (satır düzenle/sil, liste ekle/adlandır/sil, geri yükleme) aynı yapıyı kullanıyor.
 - **1.3** — Genel toplam listesi eklendi (kişi bazlı, tüm listeleri toplar).
 
 - **1.2** — Yedek butonunun "bir kez çalışıp susması" düzeltildi: modal artık her

@@ -66,6 +66,7 @@ input#amount{text-align:right}
 .box{background:var(--surface);color:var(--ink);border-radius:12px;padding:18px;width:100%;max-width:420px;display:flex;flex-direction:column;gap:12px;max-height:90vh;overflow:auto}
 .box p{margin:0}
 .box textarea{height:150px;resize:none;font-size:13px}
+.box .ptitle{font-size:17px;font-weight:700;margin:0}
 .btns{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
 .btns button{font:inherit;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);padding:10px 16px;cursor:pointer}
 .btns .primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
@@ -96,10 +97,7 @@ input#amount{text-align:right}
   <div class="total"><span class="lbl" id="lbl">Toplam</span><span class="sum" id="sum">0,00 ₺</span></div>
   <div class="total all tap" id="allbox" role="button" tabindex="0" aria-label="Genel toplam listesini aç"><span class="lbl" id="albl">Genel toplam</span><span class="sum" id="asum">0,00 ₺</span><span class="chev" aria-hidden="true">›</span></div>
 </div>
-<div id="modal" hidden><div class="box" role="dialog" aria-modal="true">
-  <p id="mmsg"></p><input id="min" type="text" autocomplete="off"><textarea id="mta"></textarea>
-  <div class="btns" id="mbtns"></div>
-</div></div>
+<div id="modal" hidden></div>
 <input type="file" id="file" accept=".json,.txt,application/json,text/plain" hidden>
 <script>
 var KEY="bagis-listesi-v3",OLD="bagis-listesi-v2",OLD1="bagis-listesi-v1",MONTHS=["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
@@ -125,33 +123,69 @@ function cur(){for(var i=0;i<data.lists.length;i++)if(data.lists[i].id===data.cu
 function save(){try{localStorage.setItem(KEY,JSON.stringify(data))}catch(e){}}
 function note(t,bad){var e=$("err");if(!e)return;e.textContent=t;e.className="msg"+(bad?" bad":"");if(!bad)setTimeout(function(){if(e.textContent===t)e.textContent=""},2000)}
 var dlgButtons=null,dlgBusy=false;
-/* Modalı her açılışta sıfırdan kurar; hiçbir butona sabit id vermez,
-   böylece id çakışması yüzünden butonların ölmesi imkânsız olur. */
+/* Modal: her açılışta kutu sıfırdan kurulur, kapanınca tamamen yok edilir.
+   Sabit kutu/id kalmadığı için bir ekranın diğerini bozması mümkün değil. */
 function openModal(o){
-  var m=$("modal"),inp=$("min"),ta=$("mta"),btns=$("mbtns");
+  var m=$("modal");
+  m.innerHTML="";
   dlgButtons=o.buttons||null;
-  $("mmsg").textContent=o.msg||"";
-  inp.hidden=!o.input;ta.hidden=!o.area;
-  inp.value=o.input?(o.def||""):"";ta.value=o.area?(o.def||""):"";
-  btns.innerHTML="";
+
+  var box=document.createElement("div");
+  box.className="box";
+  box.setAttribute("role","dialog");
+  box.setAttribute("aria-modal","true");
+
+  var msg=document.createElement("p");
+  msg.id="mmsg";
+  msg.textContent=o.msg||"";
+  box.appendChild(msg);
+
+  var inp=document.createElement("input");
+  inp.id="min";inp.type="text";inp.setAttribute("autocomplete","off");
+  inp.hidden=!o.input;inp.value=o.input?(o.def||""):"";
+  box.appendChild(inp);
+
+  var ta=document.createElement("textarea");
+  ta.id="mta";ta.hidden=!o.area;ta.value=o.area?(o.def||""):"";
+  box.appendChild(ta);
+
+  var btns=document.createElement("div");
+  btns.className="btns";btns.id="mbtns";
+  box.appendChild(btns);
+
+  m.appendChild(box);
+  m.hidden=false;
+
   return new Promise(function(res){
     var done=false;
-    function close(v){if(done)return;done=true;m.hidden=true;btns.innerHTML="";res(v)}
+    function close(v){
+      if(done)return;
+      done=true;
+      var out=(typeof v==="function")?v():v;
+      m.hidden=true;
+      m.innerHTML="";
+      res(out);
+    }
     function addBtn(label,cls,value){
       var b=document.createElement("button");b.type="button";b.textContent=label;
       if(cls)b.className=cls;
       b.onclick=function(){close(value)};
       btns.appendChild(b);return b;
     }
+    var okValue=(o.input||o.area)?"ok":"ok";
     if(o.buttons&&o.buttons.length){
-      o.buttons.forEach(function(x){addBtn(x.label,x.primary?"primary":"",x.value)});
+      o.buttons.forEach(function(x){
+        var val=x.value;
+        /* metin girişi olan pencerede "onay" butonu girilen değeri döndürür */
+        if((o.input||o.area)&&val==="ok")val=function(){return o.input?inp.value:ta.value};
+        addBtn(x.label,x.primary?"primary":"",val);
+      });
     }else{
       addBtn(o.cancel||"Vazgeç","",null);
       if(o.extra)addBtn(o.extra,"",{extra:true});
-      addBtn(o.ok||"Tamam","primary","ok");
+      addBtn(o.ok||"Tamam","primary",(o.input||o.area)?(function(){return o.input?inp.value:ta.value}):"ok");
     }
     inp.onkeydown=function(e){if(e.key==="Enter"){e.preventDefault();close(o.input?inp.value:"ok")}};
-    m.hidden=false;
     try{(o.input?inp:o.area?ta:btns.firstChild).focus()}catch(e){}
     if(o.input)try{inp.select()}catch(e){}
   });
@@ -220,17 +254,26 @@ function render(scroll){
 }
 /* --- satır düzenleme --- */
 function editRow(it){
-  dlg({msg:"Satırı düzenle (boş bırakırsan isim değişmez):",input:true,def:it.n,ok:"Devam"}).then(function(v){
-    if(v===null)return;
+  openModal({msg:"Satırı düzenle (boş bırakırsan isim değişmez):",input:true,def:it.n,buttons:[
+    {label:"Vazgeç",value:null},
+    {label:"Devam",value:"ok",primary:true}
+  ]}).then(function(v){
+    if(v===null||v===undefined)return;
     var n=String(v).trim()||it.n;
-    dlg({msg:n+" — yeni tutar:",input:true,def:fmt.format(it.k/100).replace(/\./g,""),ok:"Kaydet"}).then(function(w){
-      if(w===null)return;
+    openModal({msg:n+" — yeni tutar:",input:true,def:fmt.format(it.k/100).replace(/\./g,""),buttons:[
+      {label:"Vazgeç",value:null},
+      {label:"Kaydet",value:"ok",primary:true}
+    ]}).then(function(w){
+      if(w===null||w===undefined)return;
       var k=parse(w);
       if(k===null){note("Geçerli bir tutar yazın.",1);return}
       var dup=findByName(cur(),n,it);
       if(dup){
-        dlg({msg:"“"+n+"” listede zaten var ("+money(dup.k)+"). İki satır birleştirilsin mi? Birleşirse tutarlar toplanır.",ok:"Birleştir",cancel:"Vazgeç"}).then(function(c){
-          if(c===null)return;
+        openModal({msg:"“"+n+"” listede zaten var ("+money(dup.k)+"). İki satır birleştirilsin mi? Birleşirse tutarlar toplanır.",buttons:[
+          {label:"Vazgeç",value:null},
+          {label:"Birleştir",value:"ok",primary:true}
+        ]}).then(function(c){
+          if(c===null||c===undefined)return;
           it.n=n;it.k=k;dup.k+=k;
           cur().items=cur().items.filter(function(x){return x!==it});
           save();render(false);note("Satırlar birleştirildi");
@@ -241,8 +284,11 @@ function editRow(it){
   });
 }
 function delRow(it){
-  dlg({msg:it.n+" ("+money(it.k)+") silinsin mi?",ok:"Sil"}).then(function(v){
-    if(v===null)return;
+  openModal({msg:it.n+" ("+money(it.k)+") silinsin mi?",buttons:[
+    {label:"Vazgeç",value:null},
+    {label:"Sil",value:"ok",primary:true}
+  ]}).then(function(v){
+    if(v===null||v===undefined)return;
     cur().items=cur().items.filter(function(x){return x!==it});
     save();render(false)
   })
@@ -283,12 +329,23 @@ $("amount").addEventListener("keydown",function(e){if(e.key==="Enter"){e.prevent
 $("q").addEventListener("input",function(){render(false)});
 $("sort").onchange=function(){render(false)};
 $("sel").onchange=function(){data.cur=this.value;$("q").value="";save();render(false)};
-$("newl").onclick=function(){dlg({msg:"Yeni listenin adı:",input:true,def:defName(),ok:"Oluştur"}).then(function(v){
-  if(v===null||!v.trim())return;var id=uid();data.lists.push({id:id,name:v.trim(),items:[]});data.cur=id;save();$("q").value="";render(false);$("name").focus()})};
-$("ren").onclick=function(){var L=cur();dlg({msg:"Listenin yeni adı:",input:true,def:L.name,ok:"Kaydet"}).then(function(v){
-  if(v===null||!v.trim())return;L.name=v.trim();save();render(false)})};
-$("dell").onclick=function(){var L=cur();dlg({msg:"“"+L.name+"” listesi ve içindeki "+L.items.length+" satır silinsin mi? Bu işlem geri alınamaz.",ok:"Listeyi sil"}).then(function(v){
-  if(v===null)return;data.lists=data.lists.filter(function(x){return x.id!==L.id});
+$("newl").onclick=function(){openModal({msg:"Yeni listenin adı:",input:true,def:defName(),buttons:[
+  {label:"Vazgeç",value:null},
+  {label:"Oluştur",value:"ok",primary:true}
+]}).then(function(v){
+  if(v===null||v===undefined||!String(v).trim())return;
+  var id=uid();data.lists.push({id:id,name:String(v).trim(),items:[]});data.cur=id;save();$("q").value="";render(false);$("name").focus()})};
+$("ren").onclick=function(){var L=cur();openModal({msg:"Listenin yeni adı:",input:true,def:L.name,buttons:[
+  {label:"Vazgeç",value:null},
+  {label:"Kaydet",value:"ok",primary:true}
+]}).then(function(v){
+  if(v===null||v===undefined||!String(v).trim())return;
+  L.name=String(v).trim();save();render(false)})};
+$("dell").onclick=function(){var L=cur();openModal({msg:"“"+L.name+"” listesi ve içindeki "+L.items.length+" satır silinsin mi? Bu işlem geri alınamaz.",buttons:[
+  {label:"Vazgeç",value:null},
+  {label:"Listeyi sil",value:"ok",primary:true}
+]}).then(function(v){
+  if(v===null||v===undefined)return;data.lists=data.lists.filter(function(x){return x.id!==L.id});
   if(!data.lists.length)data.lists.push({id:uid(),name:defName(),items:[]});
   data.cur=data.lists[data.lists.length-1].id;save();render(false)})};
 $("copy").onclick=function(){
@@ -422,8 +479,11 @@ function applyRestore(raw,fileName){
   /* Birden çok liste içeren metin yedeği: her liste kendi adıyla geri yüklenir */
   if(parsed.length>1){
     var ozetCok=parsed.map(function(x){return "• "+x.name+" ("+x.items.length+" kişi)"}).join("\n");
-    return dlg({msg:parsed.length+" liste bulundu:\n"+ozetCok+"\n\nHer liste kendi adıyla geri yüklenecek. Aynı adlı liste varsa içeriği yedekle değiştirilir.",ok:"Geri yükle",cancel:"Vazgeç"}).then(function(c){
-      if(c===null)return;
+    return openModal({msg:parsed.length+" liste bulundu:\n"+ozetCok+"\n\nHer liste kendi adıyla geri yüklenecek. Aynı adlı liste varsa içeriği yedekle değiştirilir.",buttons:[
+      {label:"Vazgeç",value:null},
+      {label:"Geri yükle",value:"ok",primary:true}
+    ]}).then(function(c){
+      if(c===null||c===undefined)return;
       var yeniC=0,guncC=0;
       parsed.forEach(function(bk){
         var ex=null;for(var i=0;i<data.lists.length;i++)if(norm(data.lists[i].name)===norm(bk.name))ex=data.lists[i];
@@ -604,9 +664,8 @@ function openGeneralTotal(){
   box.className="box";
 
   var h=document.createElement("p");
-  h.innerHTML="";
-  h.appendChild(document.createTextNode("Genel toplam — "));
-  var b=document.createElement("b");b.textContent=money(toplam);h.appendChild(b);
+  h.className="ptitle";
+  h.textContent="Genel toplam: "+money(toplam);
   box.appendChild(h);
 
   var sub=document.createElement("p");
@@ -644,6 +703,7 @@ function openGeneralTotal(){
   draw("");
 
   var btns=document.createElement("div");btns.className="btns";
+  var closeTotal=function(){m.hidden=true;m.innerHTML=""};
   var copyBtn=document.createElement("button");copyBtn.type="button";copyBtn.textContent="Listeyi kopyala";
   copyBtn.onclick=function(){
     var f=norm(search.value||"");
@@ -655,13 +715,12 @@ function openGeneralTotal(){
     copyText(tx.join("\n"),"Genel toplam listesi kopyalandı");
   };
   var closeBtn=document.createElement("button");closeBtn.type="button";closeBtn.className="primary";closeBtn.textContent="Kapat";
-  closeBtn.onclick=function(){m.hidden=true};
+  closeBtn.onclick=closeTotal;
   btns.appendChild(copyBtn);btns.appendChild(closeBtn);
   box.appendChild(btns);
 
   var m=$("modal");
-  var oldBox=m.querySelector(".box");
-  if(oldBox)m.removeChild(oldBox);
+  m.innerHTML="";
   m.appendChild(box);
   m.hidden=false;
   try{search.focus()}catch(e){}
