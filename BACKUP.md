@@ -34,8 +34,11 @@ Yedek tarihi ve liste özeti gösterilir, sonra üç seçenek:
 | Buton | Ne yapar |
 |---|---|
 | **Vazgeç** | Hiçbir şey değişmez. |
-| **Yedekle değiştir** | Cihazdaki tüm listeler yedektekiyle birebir değişir. |
-| **Hepsini birleştir** | Aynı adlı liste varsa satırlar isim eşleşmesiyle güncellenir, yoksa yeni liste açılır. |
+| **Hepsini birleştir** (önerilen) | Aynı adlı liste varsa satırlar isim eşleşmesiyle güncellenir, yoksa yeni liste açılır. **Hiçbir liste silinmez.** |
+| **Yedekle değiştir…** | İki adımlı ve korumalı: önce **hangi listelerin silineceği tek tek gösterilir**, sonra "Yine de N listeyi sil" ile onay istenir. İşlemden sonra **Geri al** düğmesi çıkar; basınca önceki listeler aynen döner. |
+
+> Yedek alındıktan sonra eklenen listeler, "Hepsini birleştir" seçildiğinde korunur.
+> Değiştirme yalnızca bilinçli olarak onaylandığında çalışır.
 
 Eski `.txt` yedekleri (`İsim | Tutar`, `## Liste:` başlıkları) ve eski
 `bagis-listesi-backup-v1` JSON yedekleri de okunur.
@@ -53,6 +56,9 @@ Alt kısımdaki **Genel toplam** satırına dokununca kişi bazlı toplam listes
 
 ## Sürüm notları
 
+- **1.5** — "Yedekle değiştir" güvenli hale getirildi: silinecek listeler önceden
+  listeleniyor, ikinci onay isteniyor ve işlem sonrası "Geri al" sunuluyor.
+  Önerilen seçenek artık "Hepsini birleştir" (hiçbir listeyi silmez).
 - **1.4** — Pencere (modal) yapısı baştan yazıldı: her pencere açılışta sıfırdan
   kuruluyor, kapanınca tamamen siliniyor. Böylece genel toplam listesinden
   çıktıktan sonra Yedek menüsünün açılmaması sorunu bitti; tüm onay pencereleri

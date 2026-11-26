@@ -546,21 +546,57 @@ function applyFullBackup(payload){
   var msg=toplam+" satır, "+lists.length+" liste bulundu"+(payload.savedAt?("\nYedek tarihi: "+new Date(payload.savedAt).toLocaleString("tr-TR")):"")+":\n"+ozet+"\n\nNasıl geri yüklensin?";
   return openModal({msg:msg,buttons:[
     {label:"Vazgeç",value:null},
-    {label:"Yedekle değiştir",value:"replace"},
-    {label:"Hepsini birleştir",value:"ok",primary:true}
+    {label:"Hepsini birleştir",value:"merge",primary:true},
+    {label:"Yedekle değiştir…",value:"replace"}
   ]}).then(function(c){
     if(c===null||c===undefined)return;
     var yeni=0,gunc=0;
-    if(c!=="ok"){
-      /* Yedekle değiştir: mevcut tüm listeler yedektekiyle birebir değişir */
-      data.lists=lists.map(function(L){return {id:uid(),name:L.name,items:L.items.slice()}});
-      var hedef=null;
-      for(var i=0;i<data.lists.length;i++)if(norm(data.lists[i].name)===norm(payload.current))hedef=data.lists[i];
-      data.cur=(hedef||data.lists[0]).id;
-      save();$("q").value="";render(false);
-      note(lists.length+" liste yedekten geri yüklendi ("+toplam+" satır)");
-      return;
+    if(c==="replace"){
+      /* Değiştirme iki adımlı: önce neyin silineceği tek tek gösterilir, sonra onay istenir. */
+      var silinecek=[],korunacak=[];
+      data.lists.forEach(function(L){
+        var varMi=false;
+        for(var i=0;i<lists.length;i++)if(norm(lists[i].name)===norm(L.name))varMi=true;
+        if(varMi)korunacak.push(L);else silinecek.push(L);
+      });
+      var uyari="Yedekle değiştir: cihazdaki tüm listeler yedektekiyle değiştirilecek.";
+      if(silinecek.length){
+        uyari+="\n\nSİLİNECEK "+silinecek.length+" liste (yedekte yok):\n"+
+          silinecek.map(function(L){return "• "+L.name+" ("+L.items.length+" kişi)"}).join("\n");
+      }else{
+        uyari+="\n\nYedekte olmayan liste yok, hiçbir liste silinmeyecek.";
+      }
+      uyari+="\n\nYedekteki "+lists.length+" liste, yedekteki hâliyle yazılacak"+
+        (korunacak.length?("; "+korunacak.length+" listenin içeriği yedekle değişecek"):"")+".";
+      return openModal({msg:uyari,buttons:[
+        {label:"Vazgeç",value:null},
+        {label:"Hepsini birleştir",value:"merge"},
+        {label:silinecek.length?("Yine de "+silinecek.length+" listeyi sil"):"Değiştir",value:"confirm"}
+      ]}).then(function(c2){
+        if(c2==="merge"){mergeInto(lists);return}
+        if(c2!=="confirm")return;
+        var eski=data.lists.slice();
+        data.lists=lists.map(function(L){return {id:uid(),name:L.name,items:L.items.slice()}});
+        var hedef=null;
+        for(var i=0;i<data.lists.length;i++)if(norm(data.lists[i].name)===norm(payload.current))hedef=data.lists[i];
+        data.cur=(hedef||data.lists[0]).id;
+        save();$("q").value="";render(false);
+        /* Geri alma: silinen listeler tek dokunuşla geri gelir */
+        openModal({msg:"Yedek geri yüklendi: "+lists.length+" liste, "+toplam+" satır."+
+            (silinecek.length?("\n"+silinecek.length+" liste silindi."):"")+
+            "\n\nYanlış bir şey olduysa geri alabilirsiniz.",
+          buttons:[{label:"Tamam",value:null},{label:"Geri al",value:"undo",primary:true}]
+        }).then(function(u){
+          if(u!=="undo")return;
+          data.lists=eski;save();$("q").value="";render(false);
+          note("Geri alındı, önceki listeler yerinde");
+        });
+      });
     }
+    mergeInto(lists);
+  });
+  function mergeInto(lists){
+    var yeni=0,gunc=0;
     lists.forEach(function(bk){
       var ex=null;for(var i=0;i<data.lists.length;i++)if(norm(data.lists[i].name)===norm(bk.name))ex=data.lists[i];
       if(!ex){ex={id:uid(),name:bk.name,items:[]};data.lists.push(ex);yeni++}
@@ -571,8 +607,8 @@ function applyFullBackup(payload){
       });
     });
     save();$("q").value="";render(false);
-    note(yeni+" liste eklendi, "+gunc+" liste birleştirildi");
-  });
+    note(yeni+" liste eklendi, "+gunc+" liste birleştirildi (hiçbir liste silinmedi)");
+  }
 }
 function parseMultiBackup(text){
   var lines=String(text).split(/\r?\n/),lists=[],curL=null,i,ln;
